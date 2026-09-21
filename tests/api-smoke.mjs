@@ -1,0 +1,25 @@
+// Optional local integration check. Starts no server and refuses non-loopback targets.
+import assert from 'node:assert/strict';
+const base=process.env.TEST_BASE_URL||'http://localhost:5173';
+if(!['localhost','127.0.0.1'].includes(new URL(base).hostname))throw new Error('Only local test servers are allowed');
+const auth={cookie:'__sites_local_auth=1'};
+let checks=0;
+const ok=(condition)=>{assert.ok(condition);checks++};
+const get=()=>fetch(base+'/api/workspace',{headers:auth}).then(r=>r.json());
+const post=(revision,command,origin=base)=>fetch(base+'/api/workspace',{method:'POST',headers:{...auth,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({revision,command})});
+ok((await fetch(base+'/api/workspace')).status===401);
+let current=await get();ok(Array.isArray(current.state.patients));
+const settings={type:'settings.update',...current.state.settings};
+ok((await post(current.revision,settings,'https://untrusted.example')).status===403);
+const before=await get();const responses=await Promise.all([post(before.revision,settings),post(before.revision,settings)]);ok(responses.filter(r=>r.status===200).length===1);ok(responses.filter(r=>r.status===409).length===1);
+current=await get();ok((await post(current.revision-1,settings)).status===409);
+ok((await post(current.revision,{type:'patient.create',name:'',age:999})).status===400);
+const groupName='集成测试健康班 '+Date.now();let response=await post(current.revision,{type:'group.create',name:groupName,description:'本地虚构测试数据'});ok(response.status===200);current=await response.json();const groupId=current.state.groups.find(g=>g.name===groupName).id;
+response=await post(current.revision,{type:'patient.create',name:'集成测试虚构患者',age:40,gender:'未说明',phone:'',groupId,stage:'门诊随诊',note:'自动验证，不是真实患者'});ok(response.status===200);current=await response.json();const patientId=current.state.patients[0].id;
+response=await post(current.revision,{type:'consultation.create',patientId,question:'就诊资料如何整理？'});ok(response.status===200);current=await response.json();const consultationId=current.state.consultations[0].id;ok(current.state.consultations[0].status==='pending');
+response=await post(current.revision,{type:'review',id:consultationId,kind:'consultation',decision:'approved',body:'这是本地审核测试文本。'});ok(response.status===200);current=await response.json();ok(current.state.consultations[0].status==='approved');
+ok((await post(current.revision,{type:'review',id:consultationId,kind:'consultation',decision:'approved',body:'重复审核'})).status===400);
+response=await post(current.revision,{type:'followup.create',patientId,title:'本地测试随访',due:'2026-10-01',content:'测试内容'});ok(response.status===200);current=await response.json();const followupId=current.state.followups[0].id;
+response=await post(current.revision,{type:'followup.complete',id:followupId,result:'完成本地验证'});ok(response.status===200);current=await response.json();
+const persisted=await get();ok(persisted.state.patients.some(p=>p.id===patientId));ok(persisted.state.followups.find(f=>f.id===followupId).result==='完成本地验证');ok(persisted.revision===current.revision);
+console.log(`${checks} local API checks passed: authentication, origin, conflict, validation, group, patient, consultation, review, followup, persistence.`);

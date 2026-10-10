@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 export const metadata: Metadata = {
-    title: "MedNexusAgent · 医患服务工作台",
-    description: "医生健康班、AI 医助、人机协同审核与康复随访。",
+    title: "MEDCARE · 医患服务平台",
+    description: "MEDCARE 医生工作台与患者服务，统一数字医助王主任。",
     other: {
         "codex-preview": "development",
     },

@@ -130,7 +130,7 @@ export default function DoctorAvatar3D({ speaking, thinking, paused }: { speakin
     return () => { disposed = true; cleanup(); };
   }, []);
 
-  return <span className="doctor-avatar-3d" ref={host} role="img" aria-label={status === "ready" ? "王主任的分身，3D卡通医生" : "王主任的分身，静态备用形象"}>
+  return <span className="doctor-avatar-3d" ref={host} role="img" aria-label={status === "ready" ? "王主任，3D卡通医生" : "王主任，静态备用形象"}>
     {status !== "ready" && <img src="/avatars/mednexus-doctor.jpg" alt=""/>}
     {status === "fallback" && <small>静态模式</small>}
   </span>;

@@ -32,5 +32,5 @@ test('individual treatment questions do not receive prescriptions in demo mode',
 
 test('ovarian report demo never pretends to analyze a supplied case', async () => {
   const result=await replyToChat([{role:'user',content:'帮我分析卵巢癌病理报告：高级别浆液性癌'}],{});
-  assert.equal(result.mode,'demo'); assert.match(result.reply,/不是对您病例的分析结论/); assert.match(result.reply,/王教授审核/);
+  assert.equal(result.mode,'demo'); assert.match(result.reply,/不是对您病例的分析结论/); assert.match(result.reply,/王主任/);
 });

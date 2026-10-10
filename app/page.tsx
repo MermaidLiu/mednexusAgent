@@ -1,2 +1,5 @@
-import WorkspaceApp from '@/components/workspace-app';
-export default function Home() { return <WorkspaceApp />; }
+import PortalHome from "@/components/portal-home";
+
+export default function Home() {
+  return <PortalHome />;
+}

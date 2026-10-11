@@ -49,6 +49,24 @@ npm run build
 
 首次迁移通过 `npm run db:local` 执行并记录，之后新增迁移时重复运行即可。建表操作不会在 API 请求中执行。
 
+若 `db:local` 报 **workerd 平台不匹配**（例如 node_modules 来自 Windows/Linux 拷贝，只有 `@cloudflare/workerd-windows-64`），在本机 Mac 执行：
+
+```sh
+npm run fix:workerd
+npm run db:local
+```
+
+仍失败时在本机完整重装依赖：
+
+```sh
+rm -rf node_modules
+npm ci
+```
+
+若 `npm ci` 提示 lock 与 `package.json` 不同步（例如缺少 `@emnapi/*`），在本机先执行 **`npm install`** 更新 `package-lock.json` 后再 `npm ci`。仓库 lock 已对齐 `@rolldown/binding-wasm32-wasi` 的 `@emnapi` 嵌套依赖。
+
+然后 `npm run db:local`。
+
 ## 模型配置
 
 默认没有外部模型，不消耗 API 额度。咨询采用明确标注的服务模板。需要真实模型时，在服务端设置 `LLM_API_KEY`、`LLM_MODEL` 和可选 `LLM_BASE_URL`（HTTPS 的 OpenAI 兼容 API 前缀）。本地可将这些值加入未跟踪的 `.dev.vars`，生产用平台密钥管理。接口调用路径为 `<LLM_BASE_URL>/chat/completions`，密钥不会传给浏览器。

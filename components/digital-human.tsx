@@ -12,10 +12,10 @@ import { AVATAR_PATH, DIGITAL_DOCTOR_NAME, PRODUCT_NAME } from "@/lib/branding";
 const doctorPrompts = ["整理病例需要哪些资料？", "帮我梳理病理报告要点", "整理 BRCA / HRD 检测信息", "准备待王主任复核的问题清单"];
 const patientPrompts = ["复诊前需要准备什么？", "如何向医生描述我的不适？", "随访期间要注意什么？", "帮我整理想咨询的问题"];
 
-type Message = ChatMessage & { id: string; mode?: "demo" | "model" };
+type Message = ChatMessage & { id: string; mode?: "model" | "boundary" | "rag_miss"; channel?: string | null };
 type Variant = "doctor" | "patient";
 
-export default function DigitalHuman({ active, modelConfigured, onSettings, variant = "doctor" }: { active: boolean; modelConfigured: boolean; onSettings: () => void; variant?: Variant }) {
+export default function DigitalHuman({ active, modelConfigured, ttsConfigured = false, onSettings, variant = "doctor", patientLoggedIn = false }: { active: boolean; modelConfigured: boolean; ttsConfigured?: boolean; onSettings: () => void; variant?: Variant; patientLoggedIn?: boolean }) {
   const isPatient = variant === "patient";
   const prompts = isPatient ? patientPrompts : doctorPrompts;
   const subtitle = isPatient ? "就医咨询与资料整理" : "病例与资料分析辅助";
@@ -46,16 +46,39 @@ export default function DigitalHuman({ active, modelConfigured, onSettings, vari
     setSpeaking(null);
     setVoiceNotice("");
   }
-  useEffect(() => { setCanSpeak("speechSynthesis" in window && "SpeechSynthesisUtterance" in window); return () => { controller.current?.abort(); voiceGeneration.current++; if (voiceStartTimer.current) clearTimeout(voiceStartTimer.current); window.speechSynthesis?.cancel(); }; }, []);
+  useEffect(() => {
+    setCanSpeak(ttsConfigured || ("speechSynthesis" in window && "SpeechSynthesisUtterance" in window));
+    if (variant === "patient" && patientLoggedIn) {
+      void fetch("/api/patient/chat", { cache: "no-store" }).then(r => r.json()).then(d => {
+        const rows = (d.messages ?? []) as { role: "user" | "assistant"; content: string }[];
+        if (rows.length) setMessages(rows.map(m => ({ ...m, id: crypto.randomUUID(), mode: "model" as const })));
+      }).catch(() => {});
+    }
+    return () => { controller.current?.abort(); voiceGeneration.current++; if (voiceStartTimer.current) clearTimeout(voiceStartTimer.current); window.speechSynthesis?.cancel(); };
+  }, [variant, patientLoggedIn, ttsConfigured]);
   useEffect(() => { activeRef.current = open; if (!open) stopVoice(); }, [open]);
   useEffect(() => { voiceEnabled.current = autoVoice; if (!autoVoice) stopVoice(); }, [autoVoice]);
   useEffect(() => { const panel = scrollRef.current; if (panel) panel.scrollTop = panel.scrollHeight; }, [messages, pending, error, open]);
 
-  function speak(text: string, id: string) {
+  async function speak(text: string, id: string) {
     if (!canSpeak) return;
     stopVoice();
     const generation = voiceGeneration.current;
     setVoiceNotice("正在准备语音…");
+    if (ttsConfigured) {
+      try {
+        const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+        if (res.ok) {
+          const blob = await res.blob();
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.onplay = () => { if (generation === voiceGeneration.current) { setVoiceNotice(""); setSpeaking(id); } };
+          audio.onended = () => { if (generation === voiceGeneration.current) setSpeaking(null); URL.revokeObjectURL(audio.src); };
+          await audio.play();
+          return;
+        }
+      } catch { /* fallback below */ }
+      setVoiceNotice("火山 TTS 暂不可用，尝试浏览器语音…");
+    }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "zh-CN";
     utterance.rate = 0.95;
@@ -75,7 +98,7 @@ export default function DigitalHuman({ active, modelConfigured, onSettings, vari
 
   async function send(value = input) {
     const text = value.trim();
-    if (!text || text.length > 3000 || locked.current) return;
+    if (!text || text.length > 3000 || locked.current || !modelConfigured) return;
     locked.current = true;
     stopVoice();
     setError("");
@@ -93,9 +116,9 @@ export default function DigitalHuman({ active, modelConfigured, onSettings, vari
         body: JSON.stringify({ messages: history, audience: variant }),
         signal: abort.signal,
       });
-      const result = await response.json() as { reply?: string; mode?: "demo" | "model"; error?: string };
+      const result = await response.json() as { reply?: string; mode?: Message["mode"]; channel?: string | null; error?: string };
       if (!response.ok || !result.reply) throw new Error(result.error || "未能收到回复，请重试。");
-      const answer: Message = { id: crypto.randomUUID(), role: "assistant", content: result.reply, mode: result.mode };
+      const answer: Message = { id: crypto.randomUUID(), role: "assistant", content: result.reply, mode: result.mode, channel: result.channel ?? null };
       setMessages([...next, answer]);
       if (voiceEnabled.current && activeRef.current) speak(answer.content, answer.id);
     } catch (e) {
@@ -124,18 +147,18 @@ export default function DigitalHuman({ active, modelConfigured, onSettings, vari
     </section>
     <section className="human-conversation" aria-label="数字人对话">
       <header className="human-chat-header"><div><h2><MessageCircle size={19}/> {DIGITAL_DOCTOR_NAME}</h2><p>{modelConfigured ? `${subtitle} · AI 对话` : `${subtitle} · 演示模式`}</p></div><Button variant="ghost" size="sm" disabled={pending || !messages.length} onClick={() => { stopVoice(); setMessages([]); setInput(""); setError(""); }}><RotateCcw size={15}/>新对话</Button></header>
-      {!modelConfigured && <div className="human-demo-note"><span>当前使用本地演示回复，连接大模型后可自由交流。</span><button onClick={() => { setOpen(false); onSettings(); }}>查看接入方式</button></div>}
+      {!modelConfigured && <div className="human-demo-note"><span>大模型未配置，对话不可用（已下线演示假回复）。</span><button onClick={() => { setOpen(false); onSettings(); }}>查看接入方式</button></div>}
       <div className="human-messages" ref={scrollRef} role="log" aria-label="对话记录" aria-live="polite" aria-relevant="additions">
         <div className="human-message assistant"><img src={AVATAR_PATH} alt="" width={34} height={34}/><div><span className="speaker-name">{DIGITAL_DOCTOR_NAME}</span><div className="human-bubble">{isPatient ? introPatient : introDoctor}</div></div></div>
         {!messages.length && <div className="human-starters">{prompts.map(p => <button key={p} onClick={() => void send(p)} disabled={pending}>{p}<ArrowUp size={14}/></button>)}</div>}
-        {messages.map(message => <div className={`human-message ${message.role}`} key={message.id}>{message.role === "assistant" && <img src={AVATAR_PATH} alt="" width={34} height={34}/>}<div><span className="speaker-name">{message.role === "user" ? "你" : `${DIGITAL_DOCTOR_NAME}${message.mode === "demo" ? " · 演示回复" : " · AI 回复"}`}</span><div className="human-bubble">{message.content}</div>{message.role === "assistant" && <button className="read-message" disabled={!canSpeak} title={!canSpeak ? "当前浏览器不支持朗读" : undefined} onClick={() => speaking === message.id ? stopVoice() : speak(message.content, message.id)}>{speaking === message.id ? <Square size={13}/> : <Volume2 size={14}/>} {speaking === message.id ? "停止朗读" : "朗读"}</button>}</div></div>)}
+        {messages.map(message => <div className={`human-message ${message.role}`} key={message.id}>{message.role === "assistant" && <img src={AVATAR_PATH} alt="" width={34} height={34}/>}<div><span className="speaker-name">{message.role === "user" ? "你" : `${DIGITAL_DOCTOR_NAME}${message.mode === "boundary" ? " · 合规引导" : message.channel === "volcano" ? " · 降级通道" : " · AI 回复"}`}</span><div className="human-bubble">{message.content}</div>{message.role === "assistant" && <button className="read-message" disabled={!canSpeak} title={!canSpeak ? "当前浏览器不支持朗读" : undefined} onClick={() => speaking === message.id ? stopVoice() : speak(message.content, message.id)}>{speaking === message.id ? <Square size={13}/> : <Volume2 size={14}/>} {speaking === message.id ? "停止朗读" : "朗读"}</button>}</div></div>)}
         {pending && <div className="human-thinking"><Loader2 size={15} className="animate-spin"/> {DIGITAL_DOCTOR_NAME}正在整理回复…</div>}
       </div>
       <div className="human-compose-area">
         {error && <p className="human-error" role="alert">{error}</p>}
         {voiceNotice && <p className="human-voice-notice" role="status">{voiceNotice}</p>}
         <form className="human-composer" onSubmit={e => { e.preventDefault(); void send(); }}><Textarea aria-label={`给${DIGITAL_DOCTOR_NAME}发送消息`} placeholder={isPatient ? "描述您的就医疑问或粘贴去标识化报告文字…" : "粘贴去标识化报告文字，或输入资料整理相关问题…"} value={input} maxLength={3000} disabled={pending} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }}/><div className="human-composer-bottom"><span>Enter 发送 · Shift + Enter 换行</span>{pending ? <Button type="button" className="human-send" aria-label="停止生成" onClick={() => controller.current?.abort()}><Square size={16}/></Button> : <Button type="submit" className="human-send" disabled={!input.trim()} aria-label="发送消息"><ArrowUp size={20}/></Button>}</div></form>
-        <div className="human-chat-options"><label htmlFor="human-auto-voice"><AudioLines size={15}/> 自动朗读<Switch id="human-auto-voice" checked={autoVoice} onCheckedChange={setAutoVoice} disabled={!canSpeak}/></label><span>{canSpeak ? "浏览器语音" : "此浏览器不支持朗读"}</span></div>
+        <div className="human-chat-options"><label htmlFor="human-auto-voice"><AudioLines size={15}/> 自动朗读<Switch id="human-auto-voice" checked={autoVoice} onCheckedChange={setAutoVoice} disabled={!canSpeak || !modelConfigured}/></label><span>{ttsConfigured ? "火山 TTS" : canSpeak ? "浏览器备用语音" : "朗读不可用"}</span></div>
         <p className="human-disclaimer">AI 数字医助，非线下真人本人；内容供参考，诊疗请以主诊医生意见为准。刷新后对话清空。</p>
       </div>
     </section>

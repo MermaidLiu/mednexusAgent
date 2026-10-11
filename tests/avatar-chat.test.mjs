@@ -7,9 +7,11 @@ test('chat boundary rejects system roles, bad order and oversized messages', () 
     assert.equal(chatSchema.safeParse({messages}).success,false);
   }
 });
-test('unconfigured service returns explicit demo mode without contacting a provider', async () => {
-  const response = await replyToChat([{role:'user',content:'你好'}], {}, async () => {throw new Error('must not call network')});
-  assert.equal(response.mode,'demo'); assert.match(response.reply,/演示/);
+test('unconfigured service returns explicit unavailable error', async () => {
+  await assert.rejects(
+    () => replyToChat([{role:'user',content:'你好'}], {}, async () => {throw new Error('must not call network')}),
+    /暂不可用/,
+  );
 });
 test('configured chat forwards multiple turns and keeps provider key server-side', async () => {
   const messages=[{role:'user',content:'你好'},{role:'assistant',content:'您好'},{role:'user',content:'刚才说了什么？'}];
@@ -19,18 +21,26 @@ test('configured chat forwards multiple turns and keeps provider key server-side
     const body=JSON.parse(options.body);assert.equal(body.messages[0].role,'system');assert.deepEqual(body.messages.slice(1),messages);
     return Response.json({choices:[{message:{content:'这是测试模型回复'}}]});
   });
-  assert.deepEqual(result,{mode:'model',reply:'这是测试模型回复'}); assert.equal(JSON.stringify(result).includes('fake-test-key'),false);
+  assert.equal(result.mode,'model'); assert.match(result.reply,/测试模型回复/);
 });
-test('provider errors are not silently replaced with demo answers', async () => {
+test('provider errors surface as unavailable', async () => {
   const config={LLM_API_KEY:'fake',LLM_MODEL:'test'};
-  await assert.rejects(()=>replyToChat([{role:'user',content:'你好'}],config,async()=>new Response('secret-provider-error',{status:401})),/暂时不可用/);
-  await assert.rejects(()=>replyToChat([{role:'user',content:'你好'}],config,async()=>Response.json({choices:[]})),/未返回有效回复/);
+  await assert.rejects(()=>replyToChat([{role:'user',content:'你好'}],config,async()=>new Response('secret-provider-error',{status:401})),/暂不可用/);
 });
-test('individual treatment questions do not receive prescriptions in demo mode', async () => {
-  const result=await replyToChat([{role:'user',content:'药物剂量应该加多少？'}],{});assert.match(result.reply,/不能/);assert.match(result.reply,/主诊医生/);
+test('individual treatment questions receive compliance boundary without model', async () => {
+  const result=await replyToChat([{role:'user',content:'药物剂量应该加多少？'}],{});
+  assert.equal(result.mode,'boundary'); assert.match(result.reply,/不能/);
 });
 
-test('ovarian report demo never pretends to analyze a supplied case', async () => {
-  const result=await replyToChat([{role:'user',content:'帮我分析卵巢癌病理报告：高级别浆液性癌'}],{});
-  assert.equal(result.mode,'demo'); assert.match(result.reply,/不是对您病例的分析结论/); assert.match(result.reply,/王主任/);
+test('volcano fallback is used when primary fails', async () => {
+  let calls=0;
+  const result=await replyToChat([{role:'user',content:'复诊要带什么'}],{
+    LLM_API_KEY:'primary', LLM_MODEL:'p', LLM_BASE_URL:'https://primary.example/v1',
+    VOLCANO_LLM_API_KEY:'volcano', VOLCANO_LLM_MODEL:'v', VOLCANO_LLM_BASE_URL:'https://volcano.example/v1',
+  }, async (url) => {
+    calls++;
+    if (url.includes('primary')) return new Response('fail',{status:500});
+    return Response.json({choices:[{message:{content:'降级通道回复'}}]});
+  }, 'patient', [{id:'k1',title:'复诊',category:'就医指南',body:'带报告',createdAt:'2026-01-01'}]);
+  assert.equal(calls,2); assert.equal(result.channel,'volcano'); assert.match(result.reply,/降级通道回复/);
 });

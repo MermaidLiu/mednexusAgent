@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "test": "node --experimental-strip-types --test tests/domain.test.mjs tests/avatar-chat.test.mjs",
     "typecheck": "tsc --noEmit",
-    "db:local": "node scripts/local-db.mjs"
+    "db:local": "node scripts/local-db.mjs",
+    "fix:workerd": "node scripts/ensure-workerd.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

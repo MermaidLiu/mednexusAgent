@@ -1,5 +1,10 @@
-import {mkdirSync,writeFileSync,readdirSync} from 'node:fs';
+import {mkdirSync,writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {dirname,join} from 'node:path';
+const root=join(dirname(fileURLToPath(import.meta.url)),'..');
+const ensure=spawnSync(process.execPath,[join(root,'scripts/ensure-workerd.mjs')],{stdio:'inherit'});
+if(ensure.status!==0)process.exit(ensure.status??1);
 mkdirSync('.sites-runtime',{recursive:true});
 writeFileSync('.sites-runtime/wrangler-local.json',JSON.stringify({name:'mednexusagent',compatibility_date:'2026-05-15',d1_databases:[{binding:'DB',database_name:'mednexusagent-local',database_id:'00000000-0000-4000-8000-000000000000',migrations_dir:'../drizzle'}]}));
 const result=spawnSync(process.execPath,['node_modules/wrangler/bin/wrangler.js','d1','migrations','apply','DB','--local','--config','.sites-runtime/wrangler-local.json','--persist-to','.wrangler/state'],{stdio:'inherit'});

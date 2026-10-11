@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createWorkspace, type Workspace } from "./domain";
+import { createWorkspace, normalizeWorkspace, type Workspace } from "./domain";
 export function database() { if (!env.DB)
     throw new Error("数据库尚未配置"); return env.DB; }
 export async function readWorkspace(owner: string) {
@@ -18,7 +18,7 @@ export async function readWorkspace(owner: string) {
     }
     if (!row)
         throw new Error("无法读取工作空间");
-    return { state: JSON.parse(row.payload) as Workspace, revision: row.revision };
+    return { state: normalizeWorkspace(JSON.parse(row.payload)), revision: row.revision };
 }
 export async function saveWorkspace(owner: string, revision: number, state: Workspace) {
     const payload = JSON.stringify(state);
